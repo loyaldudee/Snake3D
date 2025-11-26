@@ -4,32 +4,26 @@ using System.Collections.Generic;
 public class SnakeSurfaceMover : MonoBehaviour
 {
     public CubeGridGenerator grid;
+    public GridRotator rotator; 
     
     [Header("Tail Settings")]
-    public GameObject tailPrefab; // Drag your Cube prefab here
+    public GameObject tailPrefab; 
     public int initialTailLength = 3;
 
     [Header("Movement Settings")]
     public float stepInterval = 0.2f;
     public float raycastCheckDistance = 2.0f; 
 
-    // --- TAIL DATA STRUCTURE ---
     struct TailSegment
     {
         public Vector3Int pos;
         public Vector3Int normal;
-
-        public TailSegment(Vector3Int p, Vector3Int n)
-        {
-            pos = p;
-            normal = n;
-        }
+        public TailSegment(Vector3Int p, Vector3Int n) { pos = p; normal = n; }
     }
 
     private List<TailSegment> tailSegments = new List<TailSegment>();
     private List<GameObject> tailVisuals = new List<GameObject>();
 
-    // State
     public Vector3Int gridPos;
     public Vector3Int localNormal; 
     
@@ -42,26 +36,25 @@ public class SnakeSurfaceMover : MonoBehaviour
     void Start()
     {
         if (grid == null) grid = FindObjectOfType<CubeGridGenerator>();
+        if (rotator == null && grid != null) rotator = grid.GetComponent<GridRotator>();
 
         Renderer r = GetComponentInChildren<Renderer>();
         if (r != null) snakeHalfSize = r.bounds.extents.x;
         else snakeHalfSize = 0.5f;
 
-        // --- SPAWN FIX ---
+        // Start on Front Face (closest to camera Z=0)
         int mid = grid.gridSize / 2;
         int n = grid.gridSize - 1;
         
-        // Spawn at Z = 0 (Closest to Camera) instead of Z = n
-        gridPos = new Vector3Int(mid, mid, 0);
-        localNormal = Vector3Int.back; // Facing the camera (-Z)
+        gridPos = new Vector3Int(mid, mid, 0); 
+        localNormal = Vector3Int.back; // Normal points to -Z (Camera)
+
+        if (transform.parent != grid.transform) transform.SetParent(grid.transform);
 
         SnapToSurface();
+        UpdateGridRotation(); 
 
-        // Initialize Tail
-        for(int i = 0; i < initialTailLength; i++)
-        {
-            Grow();
-        }
+        for(int i = 0; i < initialTailLength; i++) Grow();
     }
 
     void Update()
@@ -82,86 +75,58 @@ public class SnakeSurfaceMover : MonoBehaviour
     {
         Vector3Int spawnPos = gridPos;
         Vector3Int spawnNormal = localNormal;
-
         if (tailSegments.Count > 0)
         {
             spawnPos = tailSegments[tailSegments.Count - 1].pos;
             spawnNormal = tailSegments[tailSegments.Count - 1].normal;
         }
-
         tailSegments.Add(new TailSegment(spawnPos, spawnNormal));
-
         if (tailPrefab != null)
         {
             GameObject obj = Instantiate(tailPrefab, transform.position, Quaternion.identity);
+            obj.transform.SetParent(grid.transform); 
             tailVisuals.Add(obj);
         }
     }
 
     void HandleInput()
     {
+        if (Camera.main == null) return;
+
         Vector3Int newDir = Vector3Int.zero;
+        
+        // 1. Get Input Vector relative to Screen/Camera
+        Vector3 inputVec = Vector3.zero;
+        if (Input.GetKeyDown(KeyCode.W)) inputVec = Camera.main.transform.up;
+        if (Input.GetKeyDown(KeyCode.S)) inputVec = -Camera.main.transform.up;
+        if (Input.GetKeyDown(KeyCode.A)) inputVec = -Camera.main.transform.right;
+        if (Input.GetKeyDown(KeyCode.D)) inputVec = Camera.main.transform.right;
 
-        if (Input.GetKeyDown(KeyCode.W)) newDir = GetDirectionForInput(Vector3Int.up);
-        if (Input.GetKeyDown(KeyCode.S)) newDir = GetDirectionForInput(Vector3Int.down);
-        if (Input.GetKeyDown(KeyCode.A)) newDir = GetDirectionForInput(Vector3Int.left);
-        if (Input.GetKeyDown(KeyCode.D)) newDir = GetDirectionForInput(Vector3Int.right);
+        if (inputVec == Vector3.zero) return;
 
+        // 2. Transform this World Space input into Grid Local Space
+        // Since the grid rotates, "Up" in world space might be "Left" in grid space.
+        Vector3 localInput = grid.transform.InverseTransformDirection(inputVec);
+
+        // 3. Snap to the closest Grid Axis (Up, Down, Left, Right, Forward, Back)
+        // This automatically handles all rotation cases.
+        newDir = Vector3Int.RoundToInt(localInput.normalized);
+
+        // 4. Validation:
+        // - Cannot move into/away from surface (Normal)
+        // - Cannot reverse (180 turn)
         if (newDir != Vector3Int.zero)
         {
+            // Check against local normal (current face)
             if (newDir == localNormal || newDir == -localNormal) return;
-            
-            // Allow turning in any direction (Freedom of movement)
-            dir = newDir;
-            canMove = true;
-        }
-    }
 
-    Vector3Int GetDirectionForInput(Vector3Int input)
-    {
-        // Front (+Z) or Back (-Z) Faces
-        if (localNormal.z != 0) {
-            if (input == Vector3Int.up) return Vector3Int.up;
-            if (input == Vector3Int.down) return Vector3Int.down;
-            
-            // Adjust Left/Right for Back face so controls match camera view
-            if (localNormal.z > 0) { // Front (Far side)
-                if (input == Vector3Int.left) return Vector3Int.left; 
-                if (input == Vector3Int.right) return Vector3Int.right; 
-            }
-            else { // Back (Camera side)
-                // When looking at the back face, Left is +X (Right in grid space) and Right is -X
-                if (input == Vector3Int.left) return Vector3Int.right; 
-                if (input == Vector3Int.right) return Vector3Int.left; 
+            // Standard Snake Rule: No 180 turns
+            if (newDir != -lastDir) 
+            {
+                dir = newDir;
+                canMove = true;
             }
         }
-        // Top (+Y) or Bottom (-Y) Faces
-        if (localNormal.y != 0) {
-            if (localNormal.y > 0) { // Top
-                if (input == Vector3Int.up) return Vector3Int.forward; 
-                if (input == Vector3Int.down) return Vector3Int.back; 
-            }
-            else { // Bottom
-                if (input == Vector3Int.up) return Vector3Int.back; 
-                if (input == Vector3Int.down) return Vector3Int.forward; 
-            }
-            if (input == Vector3Int.left) return Vector3Int.left; 
-            if (input == Vector3Int.right) return Vector3Int.right;
-        }
-        // Right (+X) or Left (-X) Faces
-        if (localNormal.x != 0) {
-            if (input == Vector3Int.up) return Vector3Int.up; 
-            if (input == Vector3Int.down) return Vector3Int.down;
-            if (localNormal.x > 0) { // Right
-                if (input == Vector3Int.left) return Vector3Int.forward; 
-                if (input == Vector3Int.right) return Vector3Int.back; 
-            }
-            else { // Left
-                if (input == Vector3Int.left) return Vector3Int.back; 
-                if (input == Vector3Int.right) return Vector3Int.forward; 
-            }
-        }
-        return Vector3Int.zero;
     }
 
     void MoveStep()
@@ -169,33 +134,18 @@ public class SnakeSurfaceMover : MonoBehaviour
         Vector3Int nextPos = gridPos + dir;
         Vector3Int nextDir = dir;
         Vector3Int nextNormal = localNormal;
-        
         int n = grid.gridSize - 1;
 
-        // Wrap Logic
         bool outOfBounds = nextPos.x < 0 || nextPos.x > n || nextPos.y < 0 || nextPos.y > n || nextPos.z < 0 || nextPos.z > n;
 
-        if (outOfBounds)
-        {
-            Wrap(ref nextPos, ref nextDir, ref nextNormal, n);
-        }
-        else if (!IsSurface(nextPos))
-        {
-            return;
-        }
+        if (outOfBounds) Wrap(ref nextPos, ref nextDir, ref nextNormal, n);
+        else if (!IsSurface(nextPos)) return;
 
-        // Tail Collision Check
         for(int i = 0; i < tailSegments.Count; i++)
         {
-            if (tailSegments[i].pos == nextPos)
-            {
-                Debug.Log("GAME OVER - Hit Tail");
-                canMove = false;
-                return;
-            }
+            if (tailSegments[i].pos == nextPos) { Debug.Log("GAME OVER"); canMove = false; return; }
         }
 
-        // Update Tail History
         if (tailSegments.Count > 0)
         {
             tailSegments.Insert(0, new TailSegment(gridPos, localNormal));
@@ -203,13 +153,32 @@ public class SnakeSurfaceMover : MonoBehaviour
             UpdateTailVisuals();
         }
 
-        // Move Head
         gridPos = nextPos;
         dir = nextDir;
         localNormal = nextNormal;
         lastDir = dir;
 
         SnapToSurface();
+        UpdateGridRotation(); 
+    }
+
+    void UpdateGridRotation()
+    {
+        if (rotator == null) return;
+
+        // Target: Rotate grid so 'localNormal' points to Camera (World -Z)
+        // AND 'dir' (movement) points to Camera Up (World +Y) if possible.
+        
+        Vector3 faceNormal = (Vector3)localNormal;
+        Vector3 upReference = (dir != Vector3Int.zero) ? (Vector3)dir : Vector3.up;
+
+        // We want the inverse of the rotation that aligns (Normal -> Back, Move -> Up)
+        Quaternion targetWorldOrientation = Quaternion.LookRotation(Vector3.back, Vector3.up);
+        Quaternion faceOrientation = Quaternion.LookRotation(faceNormal, upReference);
+        
+        Quaternion targetRot = targetWorldOrientation * Quaternion.Inverse(faceOrientation);
+        
+        rotator.SetTargetRotation(targetRot);
     }
 
     void UpdateTailVisuals()
@@ -220,22 +189,43 @@ public class SnakeSurfaceMover : MonoBehaviour
             {
                 TailSegment seg = tailSegments[i];
                 GameObject vis = tailVisuals[i];
-
-                Vector3 worldPos = GridToWorld(seg.pos);
-                Vector3 worldNormal = grid.transform.TransformDirection((Vector3)seg.normal);
-                
+                Vector3 localPos = GetLocalGridPosition(seg.pos);
+                Vector3 normal = (Vector3)seg.normal;
                 float cubeExtent = grid.cubePrefab.GetComponentInChildren<Renderer>().bounds.extents.x;
-                float desiredGap = 0.1f;
-                float totalOffset = cubeExtent + desiredGap + snakeHalfSize;
-
-                vis.transform.position = worldPos + worldNormal * totalOffset;
-                vis.transform.rotation = Quaternion.LookRotation(grid.transform.up, worldNormal);
+                float totalOffset = cubeExtent + 0.1f + snakeHalfSize;
+                vis.transform.localPosition = localPos + normal * totalOffset;
+                vis.transform.localRotation = Quaternion.LookRotation(normal);
             }
         }
     }
-
-    void Wrap(ref Vector3Int pos, ref Vector3Int direction, ref Vector3Int normal, int n)
+    
+    Vector3 GetLocalGridPosition(Vector3Int g)
     {
+        float n = grid.gridSize - 1;
+        Vector3 offset = new Vector3((n * grid.spacing) / 2, (n * grid.spacing) / 2, (n * grid.spacing) / 2);
+        return new Vector3(g.x * grid.spacing, g.y * grid.spacing, g.z * grid.spacing) - offset;
+    }
+
+    void SnapToSurface()
+    {
+        if (transform.parent != grid.transform) transform.SetParent(grid.transform);
+
+        Vector3 localPos = GetLocalGridPosition(gridPos);
+        Vector3 normal = (Vector3)localNormal;
+        
+        float cubeExtent = grid.cubePrefab.GetComponentInChildren<Renderer>().bounds.extents.x;
+        float offset = cubeExtent + 0.1f + snakeHalfSize;
+
+        transform.localPosition = localPos + normal * offset;
+        
+        // ORIENTATION FIX: Rotate snake to face movement direction, with 'Up' as surface normal
+        if (dir != Vector3Int.zero)
+            transform.localRotation = Quaternion.LookRotation((Vector3)dir, normal);
+        else
+            transform.localRotation = Quaternion.LookRotation(Vector3.up, normal);
+    }
+
+    void Wrap(ref Vector3Int pos, ref Vector3Int direction, ref Vector3Int normal, int n) {
         if (normal == Vector3Int.up) {
             if (pos.x > n) { pos = new Vector3Int(n, n-1, pos.z); direction = Vector3Int.down; normal = Vector3Int.right; }
             else if (pos.x < 0) { pos = new Vector3Int(0, n-1, pos.z); direction = Vector3Int.down; normal = Vector3Int.left; }
@@ -273,51 +263,5 @@ public class SnakeSurfaceMover : MonoBehaviour
             else if (pos.x < 0) { pos = new Vector3Int(0, pos.y, 1); direction = Vector3Int.forward; normal = Vector3Int.left; }
         }
     }
-
-    bool IsSurface(Vector3Int g)
-    {
-        int n = grid.gridSize - 1;
-        if (g.x < 0 || g.y < 0 || g.z < 0) return false;
-        if (g.x > n || g.y > n || g.z > n) return false;
-        return g.x == 0 || g.y == 0 || g.z == 0 || g.x == n || g.y == n || g.z == n;
-    }
-
-    Vector3 GridToWorld(Vector3Int g)
-    {
-        float n = grid.gridSize - 1;
-        Vector3 offset = new Vector3((n * grid.spacing) / 2, (n * grid.spacing) / 2, (n * grid.spacing) / 2);
-        Vector3 localPos = new Vector3(g.x * grid.spacing, g.y * grid.spacing, g.z * grid.spacing) - offset;
-        return grid.transform.TransformPoint(localPos);
-    }
-
-    void SnapToSurface()
-    {
-        Vector3 theoreticalPos = GridToWorld(gridPos);
-        Vector3 worldNormal = grid.transform.TransformDirection((Vector3)localNormal);
-        Vector3 rayOrigin = theoreticalPos + worldNormal * grid.spacing * 1.5f;
-        Ray ray = new Ray(rayOrigin, -worldNormal);
-        RaycastHit hit;
-        float visualOffset = 0.05f + snakeHalfSize;
-
-        if (Physics.Raycast(ray, out hit, raycastCheckDistance))
-        {
-            if (hit.collider.CompareTag("grid"))
-            {
-                transform.position = hit.point + hit.normal * visualOffset;
-                if (dir != Vector3Int.zero)
-                {
-                    Vector3 worldMoveDir = grid.transform.TransformDirection((Vector3)dir);
-                    transform.rotation = Quaternion.LookRotation(worldMoveDir, hit.normal);
-                }
-                else transform.rotation = Quaternion.LookRotation(grid.transform.up, hit.normal);
-                return;
-            }
-        }
-        transform.position = theoreticalPos + worldNormal * (0.5f + visualOffset);
-        if (dir != Vector3Int.zero)
-        {
-            Vector3 worldMoveDir = grid.transform.TransformDirection((Vector3)dir);
-            transform.rotation = Quaternion.LookRotation(worldMoveDir, worldNormal);
-        }
-    }
+    bool IsSurface(Vector3Int g) { int n = grid.gridSize - 1; if (g.x < 0 || g.y < 0 || g.z < 0) return false; if (g.x > n || g.y > n || g.z > n) return false; return g.x == 0 || g.y == 0 || g.z == 0 || g.x == n || g.y == n || g.z == n; }
 }

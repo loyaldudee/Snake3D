@@ -23,6 +23,8 @@ public class CubeGridGenerator : MonoBehaviour
 
     void GenerateGrid()
     {
+        if (cubePrefab == null) return;
+
         Renderer r = cubePrefab.GetComponentInChildren<Renderer>();
         float cubeSize = r.bounds.size.x;
         spacing = cubeSize + gap;
@@ -36,31 +38,32 @@ public class CubeGridGenerator : MonoBehaviour
             {
                 for (int z=0; z<gridSize; z++)
                 {
-                    Vector3 pos = new Vector3(x*spacing, y*spacing, z*spacing) - centerOffset;
-                    Vector3 worldPos = transform.TransformPoint(pos);
-
-                    Instantiate(cubePrefab, pos, Quaternion.identity, transform);
-
-                    allCubePositions.Add(worldPos);
-                    worldToGrid[worldPos] = new Vector3Int(x,y,z);
-
+                    // Check if this coordinate is on the surface
+                    // It is on the surface if any coordinate is 0 (min) or gridSize-1 (max)
                     bool isSurface =
                         x == 0 || y == 0 || z == 0 ||
                         x == gridSize-1 || y == gridSize-1 || z == gridSize-1;
 
+                    // ONLY generate if it is a surface block
                     if (isSurface)
+                    {
+                        Vector3 pos = new Vector3(x*spacing, y*spacing, z*spacing) - centerOffset;
+                        Vector3 worldPos = transform.TransformPoint(pos);
+
+                        Instantiate(cubePrefab, pos, Quaternion.identity, transform);
+
+                        allCubePositions.Add(worldPos);
+                        worldToGrid[worldPos] = new Vector3Int(x,y,z);
                         surfacePositions.Add(worldPos);
 
-                    // front face = z == max
-                    if (z == gridSize-1)
-                        frontFacePositions.Add(worldPos);
+                        // front face = z == max
+                        if (z == gridSize-1)
+                            frontFacePositions.Add(worldPos);
+                    }
                 }
             }
         }
 
-        Debug.Log("Total cubes: " + allCubePositions.Count);
-        Debug.Log("Surface cubes: " + surfacePositions.Count);
-        Debug.Log("Front face cubes: " + frontFacePositions.Count);
+        Debug.Log("Total surface cubes generated: " + allCubePositions.Count);
     }
-
 }
