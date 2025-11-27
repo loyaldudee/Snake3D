@@ -5,6 +5,7 @@ public class SnakeSurfaceMover : MonoBehaviour
 {
     public CubeGridGenerator grid;
     public GridRotator rotator; 
+    public FoodManager foodManager; // Reference to Food Manager
     
     [Header("Tail Settings")]
     public GameObject tailPrefab; 
@@ -13,7 +14,7 @@ public class SnakeSurfaceMover : MonoBehaviour
     [Header("Movement Settings")]
     public float stepInterval = 0.2f;
     public float raycastCheckDistance = 2.0f;
-    // Removed manual smoothSpeed, we calculate it automatically for perfect sync
+    // Smooth speed is calculated automatically based on stepInterval
 
     struct TailSegment
     {
@@ -40,19 +41,43 @@ public class SnakeSurfaceMover : MonoBehaviour
 
     void Start()
     {
-        // --- AUTO-ASSIGN FIX ---
+        // --- ROBUST AUTO-ASSIGN FIX ---
+        
+        // 1. Try finding by Component Type (Fastest)
         if (grid == null) 
             grid = FindObjectOfType<CubeGridGenerator>();
 
-        if (rotator == null)
-        {
-            if (grid != null) rotator = grid.GetComponent<GridRotator>();
-            if (rotator == null) rotator = FindObjectOfType<GridRotator>();
-        }
-        
+        // 2. Fallback: Find by GameObject Name if Type search failed
         if (grid == null)
         {
-            Debug.LogError("Grid Generator not found! Please assign it in Inspector or ensure it exists in scene.");
+            GameObject gridObj = GameObject.Find("GridGenerator"); // Make sure this matches your Hierarchy name exactly!
+            if (gridObj != null) grid = gridObj.GetComponent<CubeGridGenerator>();
+        }
+
+        // 3. Find Rotator
+        if (rotator == null)
+        {
+            // Try getting it from the Grid object first
+            if (grid != null) rotator = grid.GetComponent<GridRotator>();
+            
+            // Fallback: Find by Type
+            if (rotator == null) rotator = FindObjectOfType<GridRotator>();
+            
+            // Fallback: Find by Name
+            if (rotator == null)
+            {
+                GameObject rotObj = GameObject.Find("GridGenerator"); // Assuming rotator is on GridGenerator as recommended
+                if (rotObj != null) rotator = rotObj.GetComponent<GridRotator>();
+            }
+        }
+
+        if (foodManager == null) 
+            foodManager = FindObjectOfType<FoodManager>();
+        
+        // Final Check
+        if (grid == null)
+        {
+            Debug.LogError("CRITICAL ERROR: 'GridGenerator' object not found in scene! Please rename your grid object to 'GridGenerator' or assign manually.");
             return;
         }
         // -----------------------
@@ -64,6 +89,7 @@ public class SnakeSurfaceMover : MonoBehaviour
         int mid = grid.gridSize / 2;
         int n = grid.gridSize - 1;
         
+        // Start on Front Face
         gridPos = new Vector3Int(mid, mid, 0); 
         localNormal = Vector3Int.back; 
 
@@ -82,7 +108,32 @@ public class SnakeSurfaceMover : MonoBehaviour
 
         UpdateGridRotation(); 
 
-        for(int i = 0; i < initialTailLength; i++) Grow();
+        // Initial Tail (Spawn stacked on head)
+        for(int i = 0; i < initialTailLength; i++) {
+            tailSegments.Add(new TailSegment(gridPos, localNormal));
+            AddTailVisual();
+        }
+    }
+
+    // Helper to spawn tail visual
+    void AddTailVisual()
+    {
+        if (tailPrefab != null)
+        {
+            GameObject obj = Instantiate(tailPrefab, transform.position, Quaternion.identity);
+            obj.transform.SetParent(grid.transform); 
+            tailVisuals.Add(obj);
+        }
+    }
+
+    // Public method for FoodManager to check occupancy
+    public bool IsBodyAt(Vector3Int pos)
+    {
+        foreach (var segment in tailSegments)
+        {
+            if (segment.pos == pos) return true;
+        }
+        return false;
     }
 
     void Update()
@@ -99,34 +150,14 @@ public class SnakeSurfaceMover : MonoBehaviour
         }
 
         // --- SMOOTH VISUAL UPDATE (CONSTANT SPEED) ---
-        // Calculate speed needed to traverse one grid cell exactly in 'stepInterval'
-        // Using MoveTowards instead of Lerp ensures constant linear velocity (no snapping/easing)
-        float distPerStep = (grid.spacing > 0) ? grid.spacing : 1.25f; // Fallback if spacing not init
+        float distPerStep = (grid.spacing > 0) ? grid.spacing : 1.25f;
         float moveSpeed = distPerStep / stepInterval;
-        float rotateSpeed = 90.0f / stepInterval; // 90 degrees per step
+        float rotateSpeed = 90.0f / stepInterval; 
 
         transform.localPosition = Vector3.MoveTowards(transform.localPosition, visualPos, moveSpeed * Time.deltaTime);
         transform.localRotation = Quaternion.RotateTowards(transform.localRotation, visualRot, rotateSpeed * Time.deltaTime);
         
         UpdateTailVisualsSmoothly(moveSpeed, rotateSpeed);
-    }
-
-    public void Grow()
-    {
-        Vector3Int spawnPos = gridPos;
-        Vector3Int spawnNormal = localNormal;
-        if (tailSegments.Count > 0)
-        {
-            spawnPos = tailSegments[tailSegments.Count - 1].pos;
-            spawnNormal = tailSegments[tailSegments.Count - 1].normal;
-        }
-        tailSegments.Add(new TailSegment(spawnPos, spawnNormal));
-        if (tailPrefab != null)
-        {
-            GameObject obj = Instantiate(tailPrefab, transform.position, Quaternion.identity);
-            obj.transform.SetParent(grid.transform); 
-            tailVisuals.Add(obj);
-        }
     }
 
     void HandleInput()
@@ -135,6 +166,8 @@ public class SnakeSurfaceMover : MonoBehaviour
 
         Vector3Int newDir = Vector3Int.zero;
         Vector3 inputVec = Vector3.zero;
+        
+        // Input relative to Screen
         if (Input.GetKeyDown(KeyCode.W)) inputVec = Camera.main.transform.up;
         if (Input.GetKeyDown(KeyCode.S)) inputVec = -Camera.main.transform.up;
         if (Input.GetKeyDown(KeyCode.A)) inputVec = -Camera.main.transform.right;
@@ -142,17 +175,23 @@ public class SnakeSurfaceMover : MonoBehaviour
 
         if (inputVec == Vector3.zero) return;
 
+        // Convert to Grid Space
         Vector3 localInput = grid.transform.InverseTransformDirection(inputVec);
 
+        // Find dominant axis to prevent diagonal inputs
         if (Mathf.Abs(localInput.x) > Mathf.Abs(localInput.y) && Mathf.Abs(localInput.x) > Mathf.Abs(localInput.z)) { localInput.y = 0; localInput.z = 0; }
         else if (Mathf.Abs(localInput.y) > Mathf.Abs(localInput.x) && Mathf.Abs(localInput.y) > Mathf.Abs(localInput.z)) { localInput.x = 0; localInput.z = 0; }
         else { localInput.x = 0; localInput.y = 0; }
 
         newDir = Vector3Int.RoundToInt(localInput.normalized);
 
+        // Apply Input if Valid
         if (newDir != Vector3Int.zero)
         {
+            // Cannot move into surface
             if (newDir == localNormal || newDir == -localNormal) return;
+            
+            // Cannot reverse (Standard Snake Rule)
             if (newDir != -lastDir) 
             {
                 dir = newDir;
@@ -173,17 +212,36 @@ public class SnakeSurfaceMover : MonoBehaviour
         if (outOfBounds) Wrap(ref nextPos, ref nextDir, ref nextNormal, n);
         else if (!IsSurface(nextPos)) return;
 
-        for(int i = 0; i < tailSegments.Count; i++)
+        // Check Self Collision
+        for(int i = 0; i < tailSegments.Count - 1; i++) // Skip last segment as it moves
         {
             if (tailSegments[i].pos == nextPos) { Debug.Log("GAME OVER"); canMove = false; return; }
         }
 
-        if (tailSegments.Count > 0)
+        // Check Food
+        bool ate = false;
+        if (foodManager != null && nextPos == foodManager.currentFoodGridPos)
         {
-            tailSegments.Insert(0, new TailSegment(gridPos, localNormal));
-            tailSegments.RemoveAt(tailSegments.Count - 1);
+            ate = true;
+            foodManager.SpawnFood();
         }
 
+        // Update Tail Logic
+        if (tailSegments.Count > 0 || ate)
+        {
+            tailSegments.Insert(0, new TailSegment(gridPos, localNormal));
+            
+            if (ate)
+            {
+                AddTailVisual(); // Add visual for new segment
+            }
+            else
+            {
+                tailSegments.RemoveAt(tailSegments.Count - 1);
+            }
+        }
+
+        // Move Head
         gridPos = nextPos;
         dir = nextDir;
         localNormal = nextNormal;
@@ -198,7 +256,8 @@ public class SnakeSurfaceMover : MonoBehaviour
         if (rotator == null) return;
         Vector3 faceNormal = (Vector3)localNormal;
         
-        // FIX: Stable up reference prevents grid from spinning on turns
+        // STABLE ROTATION: Only rotate when face changes.
+        // Use World Up as reference, except at poles.
         Vector3 upReference = Vector3.up;
         if (Mathf.Abs(Vector3.Dot(faceNormal, Vector3.up)) > 0.9f) 
             upReference = Vector3.forward;
@@ -206,11 +265,15 @@ public class SnakeSurfaceMover : MonoBehaviour
         Quaternion targetWorldOrientation = Quaternion.LookRotation(Vector3.back, Vector3.up);
         Quaternion faceOrientation = Quaternion.LookRotation(faceNormal, upReference);
         Quaternion targetRot = targetWorldOrientation * Quaternion.Inverse(faceOrientation);
+        
         rotator.SetTargetRotation(targetRot);
     }
 
     void UpdateTailVisualsSmoothly(float moveSpeed, float rotateSpeed)
     {
+        // Sanity check
+        while(tailVisuals.Count < tailSegments.Count) AddTailVisual();
+
         for (int i = 0; i < tailVisuals.Count; i++)
         {
             if (i < tailSegments.Count)

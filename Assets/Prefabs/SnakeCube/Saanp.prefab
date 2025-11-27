@@ -121,9 +121,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   grid: {fileID: 0}
   rotator: {fileID: 0}
+  foodManager: {fileID: 0}
   tailPrefab: {fileID: 904381441785270342, guid: 9810a58d73f1a834c96274419ad5c0d6,
     type: 3}
-  initialTailLength: 3
+  initialTailLength: 0
   stepInterval: 0.25
   raycastCheckDistance: 2
   gridPos: {x: 0, y: 0, z: 0}
