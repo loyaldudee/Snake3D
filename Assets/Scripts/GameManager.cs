@@ -12,7 +12,7 @@ public class GameManager : MonoBehaviour
         {
             // Position camera back along Z axis
             // Adjust -25f if the grid is too big or small on screen
-            Camera.main.transform.position = new Vector3(0, 0, -15f); 
+            Camera.main.transform.position = new Vector3(0, 0, -25f); 
             Camera.main.transform.rotation = Quaternion.identity; // Look forward (0,0,0)
             
             // Remove old camera script if it exists to stop it from moving

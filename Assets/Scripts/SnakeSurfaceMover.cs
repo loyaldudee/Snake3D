@@ -12,7 +12,8 @@ public class SnakeSurfaceMover : MonoBehaviour
 
     [Header("Movement Settings")]
     public float stepInterval = 0.2f;
-    public float raycastCheckDistance = 2.0f; 
+    public float raycastCheckDistance = 2.0f;
+    // Removed manual smoothSpeed, we calculate it automatically for perfect sync
 
     struct TailSegment
     {
@@ -33,25 +34,52 @@ public class SnakeSurfaceMover : MonoBehaviour
     bool canMove = false;
     float snakeHalfSize;
 
+    // Smooth Movement Variables
+    private Vector3 visualPos;
+    private Quaternion visualRot;
+
     void Start()
     {
-        if (grid == null) grid = FindObjectOfType<CubeGridGenerator>();
-        if (rotator == null && grid != null) rotator = grid.GetComponent<GridRotator>();
+        // --- AUTO-ASSIGN FIX ---
+        if (grid == null) 
+            grid = FindObjectOfType<CubeGridGenerator>();
+
+        if (rotator == null)
+        {
+            if (grid != null) rotator = grid.GetComponent<GridRotator>();
+            if (rotator == null) rotator = FindObjectOfType<GridRotator>();
+        }
+        
+        if (grid == null)
+        {
+            Debug.LogError("Grid Generator not found! Please assign it in Inspector or ensure it exists in scene.");
+            return;
+        }
+        // -----------------------
 
         Renderer r = GetComponentInChildren<Renderer>();
         if (r != null) snakeHalfSize = r.bounds.extents.x;
         else snakeHalfSize = 0.5f;
 
-        // Start on Front Face (closest to camera Z=0)
         int mid = grid.gridSize / 2;
         int n = grid.gridSize - 1;
         
         gridPos = new Vector3Int(mid, mid, 0); 
-        localNormal = Vector3Int.back; // Normal points to -Z (Camera)
+        localNormal = Vector3Int.back; 
 
         if (transform.parent != grid.transform) transform.SetParent(grid.transform);
 
-        SnapToSurface();
+        // Initial Snap
+        Vector3 startLocalPos = GetLocalGridPosition(gridPos);
+        float cubeExtent = grid.cubePrefab.GetComponentInChildren<Renderer>().bounds.extents.x;
+        float offset = cubeExtent + 0.1f + snakeHalfSize;
+        
+        visualPos = startLocalPos + (Vector3)localNormal * offset;
+        visualRot = Quaternion.LookRotation(Vector3.up, (Vector3)localNormal);
+        
+        transform.localPosition = visualPos;
+        transform.localRotation = visualRot;
+
         UpdateGridRotation(); 
 
         for(int i = 0; i < initialTailLength; i++) Grow();
@@ -69,6 +97,18 @@ public class SnakeSurfaceMover : MonoBehaviour
             timer = 0;
             MoveStep();
         }
+
+        // --- SMOOTH VISUAL UPDATE (CONSTANT SPEED) ---
+        // Calculate speed needed to traverse one grid cell exactly in 'stepInterval'
+        // Using MoveTowards instead of Lerp ensures constant linear velocity (no snapping/easing)
+        float distPerStep = (grid.spacing > 0) ? grid.spacing : 1.25f; // Fallback if spacing not init
+        float moveSpeed = distPerStep / stepInterval;
+        float rotateSpeed = 90.0f / stepInterval; // 90 degrees per step
+
+        transform.localPosition = Vector3.MoveTowards(transform.localPosition, visualPos, moveSpeed * Time.deltaTime);
+        transform.localRotation = Quaternion.RotateTowards(transform.localRotation, visualRot, rotateSpeed * Time.deltaTime);
+        
+        UpdateTailVisualsSmoothly(moveSpeed, rotateSpeed);
     }
 
     public void Grow()
@@ -94,8 +134,6 @@ public class SnakeSurfaceMover : MonoBehaviour
         if (Camera.main == null) return;
 
         Vector3Int newDir = Vector3Int.zero;
-        
-        // 1. Get Input Vector relative to Screen/Camera
         Vector3 inputVec = Vector3.zero;
         if (Input.GetKeyDown(KeyCode.W)) inputVec = Camera.main.transform.up;
         if (Input.GetKeyDown(KeyCode.S)) inputVec = -Camera.main.transform.up;
@@ -104,23 +142,17 @@ public class SnakeSurfaceMover : MonoBehaviour
 
         if (inputVec == Vector3.zero) return;
 
-        // 2. Transform this World Space input into Grid Local Space
-        // Since the grid rotates, "Up" in world space might be "Left" in grid space.
         Vector3 localInput = grid.transform.InverseTransformDirection(inputVec);
 
-        // 3. Snap to the closest Grid Axis (Up, Down, Left, Right, Forward, Back)
-        // This automatically handles all rotation cases.
+        if (Mathf.Abs(localInput.x) > Mathf.Abs(localInput.y) && Mathf.Abs(localInput.x) > Mathf.Abs(localInput.z)) { localInput.y = 0; localInput.z = 0; }
+        else if (Mathf.Abs(localInput.y) > Mathf.Abs(localInput.x) && Mathf.Abs(localInput.y) > Mathf.Abs(localInput.z)) { localInput.x = 0; localInput.z = 0; }
+        else { localInput.x = 0; localInput.y = 0; }
+
         newDir = Vector3Int.RoundToInt(localInput.normalized);
 
-        // 4. Validation:
-        // - Cannot move into/away from surface (Normal)
-        // - Cannot reverse (180 turn)
         if (newDir != Vector3Int.zero)
         {
-            // Check against local normal (current face)
             if (newDir == localNormal || newDir == -localNormal) return;
-
-            // Standard Snake Rule: No 180 turns
             if (newDir != -lastDir) 
             {
                 dir = newDir;
@@ -150,7 +182,6 @@ public class SnakeSurfaceMover : MonoBehaviour
         {
             tailSegments.Insert(0, new TailSegment(gridPos, localNormal));
             tailSegments.RemoveAt(tailSegments.Count - 1);
-            UpdateTailVisuals();
         }
 
         gridPos = nextPos;
@@ -158,30 +189,27 @@ public class SnakeSurfaceMover : MonoBehaviour
         localNormal = nextNormal;
         lastDir = dir;
 
-        SnapToSurface();
+        SetTargetVisuals(); 
         UpdateGridRotation(); 
     }
 
     void UpdateGridRotation()
     {
         if (rotator == null) return;
-
-        // Target: Rotate grid so 'localNormal' points to Camera (World -Z)
-        // AND 'dir' (movement) points to Camera Up (World +Y) if possible.
-        
         Vector3 faceNormal = (Vector3)localNormal;
-        Vector3 upReference = (dir != Vector3Int.zero) ? (Vector3)dir : Vector3.up;
+        
+        // FIX: Stable up reference prevents grid from spinning on turns
+        Vector3 upReference = Vector3.up;
+        if (Mathf.Abs(Vector3.Dot(faceNormal, Vector3.up)) > 0.9f) 
+            upReference = Vector3.forward;
 
-        // We want the inverse of the rotation that aligns (Normal -> Back, Move -> Up)
         Quaternion targetWorldOrientation = Quaternion.LookRotation(Vector3.back, Vector3.up);
         Quaternion faceOrientation = Quaternion.LookRotation(faceNormal, upReference);
-        
         Quaternion targetRot = targetWorldOrientation * Quaternion.Inverse(faceOrientation);
-        
         rotator.SetTargetRotation(targetRot);
     }
 
-    void UpdateTailVisuals()
+    void UpdateTailVisualsSmoothly(float moveSpeed, float rotateSpeed)
     {
         for (int i = 0; i < tailVisuals.Count; i++)
         {
@@ -193,8 +221,12 @@ public class SnakeSurfaceMover : MonoBehaviour
                 Vector3 normal = (Vector3)seg.normal;
                 float cubeExtent = grid.cubePrefab.GetComponentInChildren<Renderer>().bounds.extents.x;
                 float totalOffset = cubeExtent + 0.1f + snakeHalfSize;
-                vis.transform.localPosition = localPos + normal * totalOffset;
-                vis.transform.localRotation = Quaternion.LookRotation(normal);
+                
+                Vector3 targetPos = localPos + normal * totalOffset;
+                Quaternion targetRot = Quaternion.LookRotation(normal);
+
+                vis.transform.localPosition = Vector3.MoveTowards(vis.transform.localPosition, targetPos, moveSpeed * Time.deltaTime);
+                vis.transform.localRotation = Quaternion.RotateTowards(vis.transform.localRotation, targetRot, rotateSpeed * Time.deltaTime);
             }
         }
     }
@@ -206,25 +238,23 @@ public class SnakeSurfaceMover : MonoBehaviour
         return new Vector3(g.x * grid.spacing, g.y * grid.spacing, g.z * grid.spacing) - offset;
     }
 
-    void SnapToSurface()
+    void SetTargetVisuals()
     {
-        if (transform.parent != grid.transform) transform.SetParent(grid.transform);
-
         Vector3 localPos = GetLocalGridPosition(gridPos);
         Vector3 normal = (Vector3)localNormal;
         
         float cubeExtent = grid.cubePrefab.GetComponentInChildren<Renderer>().bounds.extents.x;
         float offset = cubeExtent + 0.1f + snakeHalfSize;
 
-        transform.localPosition = localPos + normal * offset;
+        visualPos = localPos + normal * offset;
         
-        // ORIENTATION FIX: Rotate snake to face movement direction, with 'Up' as surface normal
         if (dir != Vector3Int.zero)
-            transform.localRotation = Quaternion.LookRotation((Vector3)dir, normal);
+            visualRot = Quaternion.LookRotation((Vector3)dir, normal);
         else
-            transform.localRotation = Quaternion.LookRotation(Vector3.up, normal);
+            visualRot = Quaternion.LookRotation(Vector3.up, normal);
     }
 
+    // Standard Wrap Logic
     void Wrap(ref Vector3Int pos, ref Vector3Int direction, ref Vector3Int normal, int n) {
         if (normal == Vector3Int.up) {
             if (pos.x > n) { pos = new Vector3Int(n, n-1, pos.z); direction = Vector3Int.down; normal = Vector3Int.right; }
