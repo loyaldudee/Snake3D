@@ -17,6 +17,9 @@ public class SnakeSurfaceMover : MonoBehaviour
     public int initialTailLength = 3;
     public float stepInterval = 0.2f;
     public float raycastCheckDistance = 2.0f;
+    
+    [Header("Touch Settings")]
+    public float minSwipeDistance = 50f; // Minimum pixels to register a swipe
 
     struct TailSegment
     {
@@ -40,6 +43,10 @@ public class SnakeSurfaceMover : MonoBehaviour
     float snakeHalfSize;
     private Vector3 visualPos;
     private Quaternion visualRot;
+
+    // Touch variables
+    private Vector2 touchStartPos;
+    private bool isSwiping = false;
 
     void Start()
     {
@@ -81,9 +88,8 @@ public class SnakeSurfaceMover : MonoBehaviour
         if (transform.parent != grid.transform) transform.SetParent(grid.transform);
 
         // Initial Snap
-        SetTargetVisuals(); // Was SnapToSurface()
+        SetTargetVisuals(); 
         
-        // Hard set initial pos to avoid lerp from zero
         transform.localPosition = visualPos;
         transform.localRotation = visualRot;
 
@@ -119,7 +125,8 @@ public class SnakeSurfaceMover : MonoBehaviour
     {
         if (isGameOver) return;
 
-        HandleInput();
+        HandleInput();      // Keyboard
+        HandleTouchInput(); // Touch & Mouse Swipe
 
         if (!canMove) return;
 
@@ -145,23 +152,85 @@ public class SnakeSurfaceMover : MonoBehaviour
     {
         if (Camera.main == null) return;
 
-        Vector3Int newDir = Vector3Int.zero;
         Vector3 inputVec = Vector3.zero;
         
         if (Input.GetKeyDown(KeyCode.W)) inputVec = Camera.main.transform.up;
-        if (Input.GetKeyDown(KeyCode.S)) inputVec = -Camera.main.transform.up;
-        if (Input.GetKeyDown(KeyCode.A)) inputVec = -Camera.main.transform.right;
-        if (Input.GetKeyDown(KeyCode.D)) inputVec = Camera.main.transform.right;
+        else if (Input.GetKeyDown(KeyCode.S)) inputVec = -Camera.main.transform.up;
+        else if (Input.GetKeyDown(KeyCode.A)) inputVec = -Camera.main.transform.right;
+        else if (Input.GetKeyDown(KeyCode.D)) inputVec = Camera.main.transform.right;
 
-        if (inputVec == Vector3.zero) return;
+        if (inputVec != Vector3.zero) 
+            ApplyInputVector(inputVec);
+    }
 
+    void HandleTouchInput()
+    {
+        if (Camera.main == null) return;
+
+        // --- MOUSE INPUT (For Testing in Editor) ---
+        if (Input.GetMouseButtonDown(0))
+        {
+            touchStartPos = Input.mousePosition;
+            isSwiping = true;
+        }
+        else if (Input.GetMouseButtonUp(0) && isSwiping)
+        {
+            ProcessSwipe(Input.mousePosition);
+            isSwiping = false;
+        }
+
+        // --- TOUCH INPUT (For Mobile) ---
+        if (Input.touchCount > 0)
+        {
+            Touch touch = Input.GetTouch(0);
+
+            if (touch.phase == TouchPhase.Began)
+            {
+                touchStartPos = touch.position;
+            }
+            else if (touch.phase == TouchPhase.Ended)
+            {
+                ProcessSwipe(touch.position);
+            }
+        }
+    }
+
+    void ProcessSwipe(Vector2 endPos)
+    {
+        Vector2 swipeDelta = endPos - touchStartPos;
+
+        if (swipeDelta.magnitude > minSwipeDistance)
+        {
+            Vector3 inputVec = Vector3.zero;
+
+            // Normalize to find primary direction
+            if (Mathf.Abs(swipeDelta.x) > Mathf.Abs(swipeDelta.y))
+            {
+                // Horizontal Swipe
+                if (swipeDelta.x > 0) inputVec = Camera.main.transform.right; // Right
+                else inputVec = -Camera.main.transform.right; // Left
+            }
+            else
+            {
+                // Vertical Swipe
+                if (swipeDelta.y > 0) inputVec = Camera.main.transform.up; // Up
+                else inputVec = -Camera.main.transform.up; // Down
+            }
+
+            ApplyInputVector(inputVec);
+        }
+    }
+
+    // Shared logic for both Keyboard and Touch
+    void ApplyInputVector(Vector3 inputVec)
+    {
         Vector3 localInput = grid.transform.InverseTransformDirection(inputVec);
 
         if (Mathf.Abs(localInput.x) > Mathf.Abs(localInput.y) && Mathf.Abs(localInput.x) > Mathf.Abs(localInput.z)) { localInput.y = 0; localInput.z = 0; }
         else if (Mathf.Abs(localInput.y) > Mathf.Abs(localInput.x) && Mathf.Abs(localInput.y) > Mathf.Abs(localInput.z)) { localInput.x = 0; localInput.z = 0; }
         else { localInput.x = 0; localInput.y = 0; }
 
-        newDir = Vector3Int.RoundToInt(localInput.normalized);
+        Vector3Int newDir = Vector3Int.RoundToInt(localInput.normalized);
 
         if (newDir != Vector3Int.zero)
         {
@@ -186,11 +255,8 @@ public class SnakeSurfaceMover : MonoBehaviour
         if (outOfBounds) Wrap(ref nextPos, ref nextDir, ref nextNormal, n);
         else if (!IsSurface(nextPos)) return;
 
-        // --- CHECK FOOD ---
-        // Define variable here so it is available in scope
         bool willEat = (foodManager != null && nextPos == foodManager.currentFoodGridPos);
 
-        // --- LOSE CONDITION ---
         int checkCount = tailSegments.Count;
         if (!willEat) checkCount -= 1; 
 
@@ -203,7 +269,6 @@ public class SnakeSurfaceMover : MonoBehaviour
             }
         }
 
-        // --- UPDATE TAIL ---
         if (tailSegments.Count > 0 || willEat)
         {
             tailSegments.Insert(0, new TailSegment(gridPos, localNormal));
@@ -219,16 +284,14 @@ public class SnakeSurfaceMover : MonoBehaviour
             }
         }
 
-        // --- UPDATE HEAD ---
         gridPos = nextPos;
         dir = nextDir;
         localNormal = nextNormal;
         lastDir = dir;
 
-        SetTargetVisuals(); // Was SnapToSurface()
+        SetTargetVisuals(); 
         UpdateGridRotation(); 
 
-        // --- WIN CONDITION ---
         if (grid.surfacePositions.Count > 0)
         {
             int currentLength = 1 + tailSegments.Count;
@@ -291,7 +354,6 @@ public class SnakeSurfaceMover : MonoBehaviour
                 vis.transform.localPosition = Vector3.MoveTowards(vis.transform.localPosition, targetPos, moveSpeed * Time.deltaTime);
                 vis.transform.localRotation = Quaternion.RotateTowards(vis.transform.localRotation, targetRot, rotateSpeed * Time.deltaTime);
                 
-                // Scale fix in Update just in case
                 if (vis.transform.localScale.x != snakeScale) 
                     vis.transform.localScale = Vector3.one * snakeScale;
             }
@@ -312,11 +374,8 @@ public class SnakeSurfaceMover : MonoBehaviour
         float cubeExtent = grid.cubePrefab.GetComponentInChildren<Renderer>().bounds.extents.x;
         float offset = cubeExtent + 0.1f + snakeHalfSize;
         visualPos = localPos + normal * offset;
-        
-        if (dir != Vector3Int.zero) 
-            visualRot = Quaternion.LookRotation((Vector3)dir, normal);
-        else 
-            visualRot = Quaternion.LookRotation(Vector3.up, normal);
+        if (dir != Vector3Int.zero) visualRot = Quaternion.LookRotation((Vector3)dir, normal);
+        else visualRot = Quaternion.LookRotation(Vector3.up, normal);
     }
 
     void Wrap(ref Vector3Int pos, ref Vector3Int direction, ref Vector3Int normal, int n) {
