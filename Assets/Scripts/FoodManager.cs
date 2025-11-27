@@ -7,7 +7,6 @@ public class FoodManager : MonoBehaviour
     public SnakeSurfaceMover snake; 
     public GameObject foodPrefab; 
 
-    // NEW VARIABLE FOR SIZE CONTROL
     [Range(0.1f, 2.0f)]
     public float foodScale = 1.0f; 
 
@@ -21,17 +20,7 @@ public class FoodManager : MonoBehaviour
 
     public void SpawnFood()
     {
-        // Debugging to see why it fails
-        if (snake == null)
-        {
-            Debug.LogError("FoodManager: Cannot spawn food because 'snake' reference is null!");
-            return;
-        }
-        if (grid == null)
-        {
-            Debug.LogError("FoodManager: Cannot spawn food because 'grid' reference is null!");
-            return;
-        }
+        if (snake == null) return;
 
         if (currentFoodObject != null) Destroy(currentFoodObject);
 
@@ -53,11 +42,6 @@ public class FoodManager : MonoBehaviour
         {
             currentFoodGridPos = spawnPos;
             SpawnFoodVisuals(spawnPos);
-            Debug.Log("Food Spawned at: " + spawnPos); // Confirm spawn
-        }
-        else
-        {
-            Debug.LogWarning("FoodManager: Could not find empty spot for food after 100 attempts!");
         }
     }
 
@@ -91,14 +75,11 @@ public class FoodManager : MonoBehaviour
 
     void SpawnFoodVisuals(Vector3Int gridPos)
     {
-        // Safe spacing calculation
         float effectiveSpacing = grid.spacing;
         if (effectiveSpacing <= 0.001f)
         {
-            // If spacing is 0, calculate it manually
-            // This happens if GridGenerator hasn't run fully or gap is default
             float defaultGap = grid.gap > 0 ? grid.gap : 0.25f;
-            effectiveSpacing = 1.0f + defaultGap; // Assuming prefab size 1.0
+            effectiveSpacing = 1.0f + defaultGap; 
         }
 
         float n = grid.gridSize - 1;
@@ -122,7 +103,6 @@ public class FoodManager : MonoBehaviour
         currentFoodObject.transform.localPosition = spawnLocalPos;
         currentFoodObject.transform.localRotation = Quaternion.LookRotation(normal);
         
-        // APPLY CUSTOM SCALE
         currentFoodObject.transform.localScale = Vector3.one * foodScale; 
     }
 }

@@ -5,14 +5,19 @@ public class GameManager : MonoBehaviour
     public GameObject snakeHeadPrefab;
     private GameObject snakeHead;
 
+    public float factor;
+
     void Start()
     {
         // 1. Setup Fixed Camera Position
         if (Camera.main != null)
         {
+            // Position camera back along Z axis looking at origin
+            // Adjust -18f based on your grid size preference
             Camera.main.transform.position = new Vector3(0, 0, -18f); 
-            Camera.main.transform.rotation = Quaternion.identity;
+            Camera.main.transform.rotation = Quaternion.identity; // Look forward (0,0,0)
             
+            // Remove old camera script if it exists
             var oldCam = Camera.main.GetComponent<SnakeCamera>();
             if (oldCam != null) Destroy(oldCam);
         }
