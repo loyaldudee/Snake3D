@@ -7,6 +7,7 @@ public class SnakeSurfaceMover : MonoBehaviour
     public GridRotator rotator; 
     public FoodManager foodManager; 
     public UIManager uiManager;
+    public ScoreManager scoreManager; // Reference to Score Manager
     
     [Header("Visual Settings")]
     public GameObject tailPrefab; 
@@ -19,7 +20,7 @@ public class SnakeSurfaceMover : MonoBehaviour
     public float raycastCheckDistance = 2.0f;
     
     [Header("Touch Settings")]
-    public float minSwipeDistance = 50f; // Minimum pixels to register a swipe
+    public float minSwipeDistance = 50f;
 
     struct TailSegment
     {
@@ -44,7 +45,6 @@ public class SnakeSurfaceMover : MonoBehaviour
     private Vector3 visualPos;
     private Quaternion visualRot;
 
-    // Touch variables
     private Vector2 touchStartPos;
     private bool isSwiping = false;
 
@@ -69,10 +69,12 @@ public class SnakeSurfaceMover : MonoBehaviour
         if (foodManager == null) foodManager = FindObjectOfType<FoodManager>();
         if (uiManager == null) uiManager = FindObjectOfType<UIManager>();
         
+        // Find Score Manager
+        if (scoreManager == null) scoreManager = FindObjectOfType<ScoreManager>();
+        
         if (grid == null) { Debug.LogError("Grid Generator not found!"); return; }
         // -----------------------
 
-        // Apply Scale to Head
         transform.localScale = Vector3.one * snakeScale;
 
         Renderer r = GetComponentInChildren<Renderer>();
@@ -87,7 +89,6 @@ public class SnakeSurfaceMover : MonoBehaviour
 
         if (transform.parent != grid.transform) transform.SetParent(grid.transform);
 
-        // Initial Snap
         SetTargetVisuals(); 
         
         transform.localPosition = visualPos;
@@ -125,8 +126,8 @@ public class SnakeSurfaceMover : MonoBehaviour
     {
         if (isGameOver) return;
 
-        HandleInput();      // Keyboard
-        HandleTouchInput(); // Touch & Mouse Swipe
+        HandleInput();      
+        HandleTouchInput(); 
 
         if (!canMove) return;
 
@@ -137,7 +138,6 @@ public class SnakeSurfaceMover : MonoBehaviour
             MoveStep();
         }
 
-        // Smooth Update
         float distPerStep = (grid.spacing > 0) ? grid.spacing : 1.25f;
         float moveSpeed = distPerStep / stepInterval;
         float rotateSpeed = 90.0f / stepInterval; 
@@ -167,7 +167,6 @@ public class SnakeSurfaceMover : MonoBehaviour
     {
         if (Camera.main == null) return;
 
-        // --- MOUSE INPUT (For Testing in Editor) ---
         if (Input.GetMouseButtonDown(0))
         {
             touchStartPos = Input.mousePosition;
@@ -179,7 +178,6 @@ public class SnakeSurfaceMover : MonoBehaviour
             isSwiping = false;
         }
 
-        // --- TOUCH INPUT (For Mobile) ---
         if (Input.touchCount > 0)
         {
             Touch touch = Input.GetTouch(0);
@@ -203,25 +201,21 @@ public class SnakeSurfaceMover : MonoBehaviour
         {
             Vector3 inputVec = Vector3.zero;
 
-            // Normalize to find primary direction
             if (Mathf.Abs(swipeDelta.x) > Mathf.Abs(swipeDelta.y))
             {
-                // Horizontal Swipe
-                if (swipeDelta.x > 0) inputVec = Camera.main.transform.right; // Right
-                else inputVec = -Camera.main.transform.right; // Left
+                if (swipeDelta.x > 0) inputVec = Camera.main.transform.right; 
+                else inputVec = -Camera.main.transform.right; 
             }
             else
             {
-                // Vertical Swipe
-                if (swipeDelta.y > 0) inputVec = Camera.main.transform.up; // Up
-                else inputVec = -Camera.main.transform.up; // Down
+                if (swipeDelta.y > 0) inputVec = Camera.main.transform.up; 
+                else inputVec = -Camera.main.transform.up; 
             }
 
             ApplyInputVector(inputVec);
         }
     }
 
-    // Shared logic for both Keyboard and Touch
     void ApplyInputVector(Vector3 inputVec)
     {
         Vector3 localInput = grid.transform.InverseTransformDirection(inputVec);
@@ -277,6 +271,9 @@ public class SnakeSurfaceMover : MonoBehaviour
             {
                 foodManager.SpawnFood();
                 AddTailVisual(); 
+                
+                // ADD SCORE
+                if (scoreManager != null) scoreManager.AddPoints();
             }
             else
             {
