@@ -24,8 +24,6 @@ public class AudioManager : MonoBehaviour
 
         audioSource.loop = false; 
         audioSource.playOnAwake = false;
-        
-        // Removed DontDestroyOnLoad to ensure music restarts on level reload
     }
 
     void Start()
@@ -36,9 +34,20 @@ public class AudioManager : MonoBehaviour
         }
     }
 
+    // NEW METHOD FOR UI
+    public void SetMute(bool isMuted)
+    {
+        if (audioSource != null)
+        {
+            audioSource.mute = isMuted;
+        }
+    }
+
     void Update()
     {
-        audioSource.volume = volume;
+        // Only apply volume if not muted (mute overrides volume)
+        if (!audioSource.mute)
+            audioSource.volume = volume;
 
         if (!audioSource.isPlaying && audioSource.clip != null && audioSource.time == 0f)
         {
