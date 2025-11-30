@@ -299,11 +299,16 @@ public class SnakeSurfaceMover : MonoBehaviour
         }
     }
 
-    void GameOver()
+        void GameOver()
     {
         Debug.Log("<color=red>GAME OVER!</color> You hit yourself.");
         canMove = false;
         isGameOver = true;
+        
+        // --- NEW: Save the score ---
+        if (scoreManager != null) scoreManager.SaveScore();
+        // ---------------------------
+
         if (uiManager != null) uiManager.ShowGameOver();
     }
 

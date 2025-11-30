@@ -1,14 +1,15 @@
 using UnityEngine;
-using UnityEngine.UI; // Or TMPro if using TextMeshPro
+using UnityEngine.UI;
 
 public class ScoreManager : MonoBehaviour
 {
     [Header("UI Reference")]
-    // public Text scoreText; // Assign a legacy UI Text object here
-    public TMPro.TMP_Text scoreText; // Uncomment if using TextMeshPro
+    //public Text scoreText; // Legacy Text
+    public TMPro.TMP_Text scoreText; // Uncomment for TextMeshPro
 
     private int currentScore = 0;
     private int foodEatenCount = 0;
+    private const string RecentScoresKey = "RecentScores";
 
     void Start()
     {
@@ -17,15 +18,8 @@ public class ScoreManager : MonoBehaviour
 
     public void AddPoints()
     {
-        // Calculate points based on Fibonacci
-        // Sequence: 1, 1, 2, 3, 5, 8, 13... based on foodEatenCount
-        // foodEatenCount starts at 0. 
-        // 1st food (count=0) -> Fib(1) = 1
-        // 2nd food (count=1) -> Fib(2) = 1
-        // 3rd food (count=2) -> Fib(3) = 2
-        
+        // Fibonacci Points: 1, 1, 2, 3, 5, 8...
         int pointsToAdd = GetFibonacci(foodEatenCount + 1);
-        
         currentScore += pointsToAdd;
         foodEatenCount++;
         
@@ -40,22 +34,35 @@ public class ScoreManager : MonoBehaviour
         }
     }
 
-    // Recursive or Iterative Fibonacci function
+    // Call this when Game Over happens
+    public void SaveScore()
+    {
+        // 1. Get existing scores string (e.g., "100,50,20")
+        string savedScores = PlayerPrefs.GetString(RecentScoresKey, "");
+
+        // 2. Add new score to the end
+        if (string.IsNullOrEmpty(savedScores))
+        {
+            savedScores = currentScore.ToString();
+        }
+        else
+        {
+            savedScores += "," + currentScore;
+        }
+
+        // 3. Save it back
+        PlayerPrefs.SetString(RecentScoresKey, savedScores);
+        PlayerPrefs.Save();
+        
+        Debug.Log("Score Saved: " + currentScore);
+    }
+
     int GetFibonacci(int n)
     {
         if (n <= 0) return 0;
         if (n == 1) return 1;
-        
-        int a = 0;
-        int b = 1;
-        
-        for (int i = 2; i <= n; i++)
-        {
-            int temp = a + b;
-            a = b;
-            b = temp;
-        }
+        int a = 0, b = 1;
+        for (int i = 2; i <= n; i++) { int temp = a + b; a = b; b = temp; }
         return b;
     }
-
 }
