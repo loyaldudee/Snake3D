@@ -13,7 +13,6 @@ public class MainMenuManager : MonoBehaviour
     public TMP_Text nameDisplayText; 
     public Button playButton;
     public Button resetButton;
-    public TMP_Text welcomeText; 
 
     [Header("Leaderboard UI")]
     public GameObject leaderboardPanel;
@@ -26,17 +25,18 @@ public class MainMenuManager : MonoBehaviour
     public TMP_Text recentScoreText; 
 
     [Header("Scene Settings")]
-    public string gameSceneName = "SampleScene"; 
+    public string gameSceneName = "GameScene"; 
 
+    private string playerCodeKey = "PlayerCode"; 
     private string playerNameKey = "PlayerName";
-    private string recentScoresKey = "RecentScores";
+    private string recentScoresKey = "RecentScores"; // Added back
 
     void Start()
     {
-        if (PlayerPrefs.HasKey(playerNameKey))
+        if (PlayerPrefs.HasKey(playerCodeKey))
         {
-            string savedName = PlayerPrefs.GetString(playerNameKey);
-            OnNameSubmitted(savedName);
+            string savedName = PlayerPrefs.GetString(playerNameKey, "Player");
+            OnLoginSuccess(savedName);
         }
         else
         {
@@ -44,7 +44,7 @@ public class MainMenuManager : MonoBehaviour
         }
 
         if (playButton != null) playButton.onClick.AddListener(PlayGame);
-        if (resetButton != null) resetButton.onClick.AddListener(ResetName);
+        if (resetButton != null) resetButton.onClick.AddListener(ResetLocalData);
         if (submitButton != null) submitButton.onClick.AddListener(OnSubmitPressed);
         
         if (nameInputField != null)
@@ -56,12 +56,12 @@ public class MainMenuManager : MonoBehaviour
         if (openLeaderboardButton != null) openLeaderboardButton.onClick.AddListener(ToggleLeaderboard);
         if (openRecentScoresButton != null) openRecentScoresButton.onClick.AddListener(ToggleRecentScores);
 
-        // Initial State
         if (leaderboardPanel != null) leaderboardPanel.SetActive(false);
         if (recentScorePanel != null) recentScorePanel.SetActive(false);
         SetMainMenuVisible(true);
     }
 
+    // --- LEADERBOARD (API) ---
     public void ToggleLeaderboard()
     {
         bool isActive = leaderboardPanel.activeSelf;
@@ -75,10 +75,24 @@ public class MainMenuManager : MonoBehaviour
             leaderboardPanel.SetActive(true);
             if (recentScorePanel != null) recentScorePanel.SetActive(false);
             SetMainMenuVisible(false);
-            UpdateLeaderboardText();
+            
+            leaderboardText.text = "Loading Global Ranks...";
+            
+            // Call API
+            APIManager.Instance.GetLeaderboard((scores) => {
+                string finalString = "--- GLOBAL LEADERBOARD ---\n\n";
+                int rank = 1;
+                foreach(var s in scores)
+                {
+                    finalString += $"{rank}. {s.name}: {s.score}\n";
+                    rank++;
+                }
+                leaderboardText.text = finalString;
+            });
         }
     }
 
+    // --- RECENT SCORES (LOCAL PLAYER PREFS) ---
     public void ToggleRecentScores()
     {
         bool isActive = recentScorePanel.activeSelf;
@@ -92,21 +106,14 @@ public class MainMenuManager : MonoBehaviour
             recentScorePanel.SetActive(true);
             if (leaderboardPanel != null) leaderboardPanel.SetActive(false);
             SetMainMenuVisible(false);
-            UpdateRecentScoresText();
+
+            // Read from Local PlayerPrefs
+            UpdateRecentScoresTextLocal();
         }
     }
 
-    void SetMainMenuVisible(bool show)
+    void UpdateRecentScoresTextLocal()
     {
-        if (mainMenuPanel != null) mainMenuPanel.SetActive(show);
-    }
-
-    // --- TEXT POPULATION ---
-
-    void UpdateRecentScoresText()
-    {
-        if (recentScoreText == null) return;
-
         string saved = PlayerPrefs.GetString(recentScoresKey, "");
         if (string.IsNullOrEmpty(saved))
         {
@@ -114,10 +121,10 @@ public class MainMenuManager : MonoBehaviour
         }
         else
         {
-            string finalString = "--- RECENT SCORES ---\n\n";
+            string finalString = "--- LOCAL HISTORY ---\n\n";
             string[] scores = saved.Split(',');
             
-            // Show latest scores first
+            // Show latest scores first (reverse loop)
             for (int i = scores.Length - 1; i >= 0; i--)
             {
                 if (!string.IsNullOrEmpty(scores[i]))
@@ -127,39 +134,50 @@ public class MainMenuManager : MonoBehaviour
         }
     }
 
-    void UpdateLeaderboardText()
+    void SetMainMenuVisible(bool show)
     {
-        if (leaderboardText == null) return;
-        
-        // Static dummy leaderboard for now since we don't have online features
-        string finalString = "--- GLOBAL LEADERBOARD ---\n\n";
-        finalString += "1. SnakeKing: 5000\n";
-        finalString += "2. ProGamer: 3000\n";
-        finalString += "3. Viper: 1000\n";
-        finalString += "4. Noob: 10\n";
-        
-        leaderboardText.text = finalString;
+        if (mainMenuPanel != null) mainMenuPanel.SetActive(show);
     }
 
-    // --- STANDARD LOGIC ---
     void ValidateInput(string input) { if (submitButton != null) submitButton.interactable = !string.IsNullOrEmpty(input); }
+    
     public void OnSubmitPressed() {
         if (nameInputField != null && !string.IsNullOrEmpty(nameInputField.text)) {
             string enteredName = nameInputField.text;
-            PlayerPrefs.SetString(playerNameKey, enteredName);
-            PlayerPrefs.Save();
-            OnNameSubmitted(enteredName);
+            submitButton.interactable = false;
+            
+            APIManager.Instance.RegisterPlayer(enteredName, 
+                (playerCode) => {
+                    PlayerPrefs.SetString(playerCodeKey, playerCode);
+                    PlayerPrefs.SetString(playerNameKey, enteredName);
+                    PlayerPrefs.Save();
+                    OnLoginSuccess(enteredName);
+                },
+                (error) => {
+                    Debug.LogError("Registration Failed: " + error);
+                    submitButton.interactable = true;
+                }
+            );
         }
     }
-    void OnNameSubmitted(string name) {
+
+    void OnLoginSuccess(string name) {
         if (nameDisplayText != null) { nameDisplayText.text = "Player: " + name; nameDisplayText.gameObject.SetActive(true); }
         if (nameInputField != null) nameInputField.gameObject.SetActive(false);
         if (submitButton != null) submitButton.gameObject.SetActive(false);
         if (playButton != null) playButton.interactable = true; 
         if (resetButton != null) resetButton.gameObject.SetActive(true);
     }
-    public void PlayGame() { if (!string.IsNullOrEmpty(gameSceneName)) SceneManager.LoadScene(gameSceneName); else Debug.LogError("Scene Name Missing"); }
-    public void ResetName() { PlayerPrefs.DeleteKey(playerNameKey); ResetUI(); }
+
+    public void PlayGame() { if (!string.IsNullOrEmpty(gameSceneName)) SceneManager.LoadScene(gameSceneName); }
+    
+    public void ResetLocalData() { 
+        PlayerPrefs.DeleteKey(playerCodeKey); 
+        PlayerPrefs.DeleteKey(playerNameKey);
+        PlayerPrefs.DeleteKey(recentScoresKey); // Clear history too
+        ResetUI(); 
+    }
+
     void ResetUI() {
         if (nameDisplayText != null) { nameDisplayText.text = ""; nameDisplayText.gameObject.SetActive(false); }
         if (nameInputField != null) { nameInputField.text = ""; nameInputField.gameObject.SetActive(true); }

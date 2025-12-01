@@ -1,15 +1,18 @@
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro; 
 
 public class ScoreManager : MonoBehaviour
 {
     [Header("UI Reference")]
-    //public Text scoreText; // Legacy Text
-    public TMPro.TMP_Text scoreText; // Uncomment for TextMeshPro
+    public TMP_Text scoreText; 
 
     private int currentScore = 0;
     private int foodEatenCount = 0;
+    
+    // Keys for PlayerPrefs
     private const string RecentScoresKey = "RecentScores";
+    private const string PlayerCodeKey = "PlayerCode"; 
 
     void Start()
     {
@@ -18,7 +21,6 @@ public class ScoreManager : MonoBehaviour
 
     public void AddPoints()
     {
-        // Fibonacci Points: 1, 1, 2, 3, 5, 8...
         int pointsToAdd = GetFibonacci(foodEatenCount + 1);
         currentScore += pointsToAdd;
         foodEatenCount++;
@@ -34,27 +36,34 @@ public class ScoreManager : MonoBehaviour
         }
     }
 
-    // Call this when Game Over happens
+    // --- HYBRID SAVE SYSTEM ---
     public void SaveScore()
     {
-        // 1. Get existing scores string (e.g., "100,50,20")
+        // 1. LOCAL SAVE (Managed by PlayerPrefs)
         string savedScores = PlayerPrefs.GetString(RecentScoresKey, "");
-
-        // 2. Add new score to the end
         if (string.IsNullOrEmpty(savedScores))
         {
             savedScores = currentScore.ToString();
         }
         else
         {
+            // Append new score to the end (comma separated)
             savedScores += "," + currentScore;
         }
-
-        // 3. Save it back
         PlayerPrefs.SetString(RecentScoresKey, savedScores);
         PlayerPrefs.Save();
-        
-        Debug.Log("Score Saved: " + currentScore);
+        Debug.Log("Score Saved Locally.");
+
+        // 2. BACKEND SUBMISSION (For Global Leaderboard)
+        if (PlayerPrefs.HasKey(PlayerCodeKey))
+        {
+            string playerCode = PlayerPrefs.GetString(PlayerCodeKey);
+            
+            if (APIManager.Instance != null)
+            {
+                APIManager.Instance.SubmitScore(playerCode, currentScore);
+            }
+        }
     }
 
     int GetFibonacci(int n)
