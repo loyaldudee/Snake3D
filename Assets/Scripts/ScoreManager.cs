@@ -21,9 +21,19 @@ public class ScoreManager : MonoBehaviour
 
     public void AddPoints()
     {
-        int pointsToAdd = GetFibonacci(foodEatenCount + 1);
-        currentScore += pointsToAdd;
+        // OLD: int pointsToAdd = GetFibonacci(foodEatenCount + 1);
+        
+        // NEW: Quadratic Scaling
+        // 1st apple: 105 pts
+        // 10th apple: 1,500 pts
+        // 50th apple: 17,500 pts
+        // 100th apple: 60,000 pts
+        // Max (Full Grid ~100): Total Score approx 2-3 Million (Safe from 1 Billion limit)
         foodEatenCount++;
+        
+        int pointsToAdd = (foodEatenCount * 100) + (foodEatenCount * foodEatenCount * 5);
+        
+        currentScore += pointsToAdd;
         
         UpdateScoreUI();
     }
@@ -65,13 +75,6 @@ public class ScoreManager : MonoBehaviour
             }
         }
     }
-
-    int GetFibonacci(int n)
-    {
-        if (n <= 0) return 0;
-        if (n == 1) return 1;
-        int a = 0, b = 1;
-        for (int i = 2; i <= n; i++) { int temp = a + b; a = b; b = temp; }
-        return b;
-    }
+    
+    // REMOVED: GetFibonacci function is no longer needed.
 }
